@@ -63,6 +63,7 @@ class Sella(Optimizer):
         rs: str = None,
         nsteps_per_diag: int = 3,
         diag_every_n: Optional[int] = None,
+        check_nsteps: Optional[int] = None,
         hessian_function: Optional[Callable[[Atoms], np.ndarray]] = None,
         **kwargs
     ):
@@ -142,6 +143,7 @@ class Sella(Optimizer):
         self.constraints_tol = constraints_tol
         self.diagkwargs = dict(gamma=gamma, threepoint=threepoint)
         self.rho = 1.
+        self.check_nsteps = check_nsteps
 
         if self.ord != 0 and not self.eig:
             warnings.warn("Saddle point optimizations with eig=False will "
@@ -250,10 +252,14 @@ class Sella(Optimizer):
         else:
             ev = False
 
+        if self.nsteps in self.check_nsteps:
+            ev = True
+
         if ev:
             self.nsteps_since_diag = 0
         else:
             self.nsteps_since_diag += 1
+
 
         rho = self.pes.kick(s, ev, **self.diagkwargs)
 
