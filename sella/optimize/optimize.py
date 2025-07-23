@@ -62,6 +62,7 @@ class Sella(Optimizer):
         append_trajectory: bool = False,
         rs: str = None,
         nsteps_per_diag: int = 3,
+        nsteps_per_force_diag: int = 10,
         diag_every_n: Optional[int] = None,
         check_nsteps: Optional[int] = None,
         hessian_function: Optional[Callable[[Atoms], np.ndarray]] = None,
@@ -144,6 +145,7 @@ class Sella(Optimizer):
         self.diagkwargs = dict(gamma=gamma, threepoint=threepoint)
         self.rho = 1.
         self.check_nsteps = check_nsteps
+        self.last_hessian_step = 0
 
         if self.ord != 0 and not self.eig:
             warnings.warn("Saddle point optimizations with eig=False will "
@@ -153,6 +155,7 @@ class Sella(Optimizer):
         self.initialized = False
         self.xi = 1.
         self.nsteps_per_diag = nsteps_per_diag
+        self.nsteps_per_force_diag = nsteps_per_force_diag
         self.nsteps_since_diag = 0
         self.diag_every_n = np.inf if diag_every_n is None else diag_every_n
 
@@ -239,6 +242,10 @@ class Sella(Optimizer):
     def step(self):
         s, smag = self._predict_step()
 
+        # if fmax < self.fmax:
+        #     ev = True
+        #     print("Force is small, check the final Hessian")
+
         # Determine if we need to call the eigensolver, then step
         if self.nsteps_since_diag >= self.diag_every_n:
             ev = True
@@ -252,13 +259,36 @@ class Sella(Optimizer):
         else:
             ev = False
 
+        # ### Check the Hessian when force is small ###
+        # if fmax < 0.002 and (self.nsteps_since_diag > self.nsteps_per_force_diag):
+        #     ev = True
+        
+
+        ## check the Hessian after update ##
+        hessian = self.pes.H
+        eigen_values = hessian.evals
+
+        if (eigen_values[0] < 0) and (eigen_values[1] > 0) and (self.nsteps < (self.last_hessian_step + 5)):
+            ev = False
+            # self.nsteps_since_diag = 0
+        elif (np.abs(eigen_values[1] / eigen_values[0]) < 0.1) and (self.nsteps < (self.last_hessian_step + 5)):
+            ev = False
+
         if self.nsteps in self.check_nsteps:
             ev = True
 
         if ev:
+            self.last_hessian_step = self.nsteps
             self.nsteps_since_diag = 0
+            print("Will update Hessian")
         else:
             self.nsteps_since_diag += 1
+
+        
+
+        # elif (eigen_values[0] < 0) and (eigen_values[1] < 0) and (np.abs(eigen_values[1] / eigen_values[0]) < 0.1):
+        #     ev = False
+        #     self.nsteps_since_diag = 0
 
 
         rho = self.pes.kick(s, ev, **self.diagkwargs)
@@ -290,6 +320,19 @@ class Sella(Optimizer):
         self.rho = rho
         if self.rho is None:
             self.rho = 1.
+
+        ## check the Hessian after update ##
+        hessian = self.pes.H
+        eigen_values = hessian.evals
+        # if (eigen_values[0] < 0) and (eigen_values[1] < 0) and (ev):
+        #     if np.abs(eigen_values[1] / eigen_values[0]) > 0.5 and (self.ord == 1):
+        #         print("Increase trust radius because of bad Hessian")
+        #         print("self.sigma_inc * smag = ", self.sigma_inc * smag)
+        #         print("self.delta = ", self.delta)
+        #         print("rho = ", rho)
+        #         self.delta = max(self.sigma_inc * smag, self.delta)
+
+        #     print(eigen_values)
 
     def converged(self, forces=None):
         return self.pes.converged(self.fmax)[0]
